@@ -17,7 +17,7 @@
 package cats.effect
 
 import cats.{Defer, Monad, MonadError}
-import cats.data.{OptionT, EitherT, ReaderT, Kleisli}
+import cats.data.{OptionT, EitherT, ReaderT, Kleisli, StateT}
 import scala.concurrent.duration.FiniteDuration
 import java.time.Instant
 
@@ -38,6 +38,11 @@ object Sync {
 
   implicit def eitherTSync[F[_]: Sync, E]: Sync[EitherT[F, E, *]] =
     new EitherTSync[F, E] {
+      override def F: Sync[F] = Sync[F]
+    }
+
+  implicit def stateTSync[F[_]: Sync, S]: Sync[StateT[F, S, *]] =
+    new StateTSync[F, S] {
       override def F: Sync[F] = Sync[F]
     }
 
@@ -111,6 +116,40 @@ object Sync {
 
     override def defer[A](thunk: => EitherT[F, E, A]): EitherT[F, E, A] =
       EitherT(F.defer(thunk.value))
+  }
+
+  trait StateTSync[F[_], S] extends Sync[StateT[F, S, *]] {
+    implicit protected def F: Sync[F]
+
+    override def pure[A](x: A): StateT[F, S, A] =
+      Monad[StateT[F, S, *]].pure(x)
+
+    override def raiseError[A](e: Throwable): StateT[F, S, A] =
+      MonadError[StateT[F, S, *], Throwable].raiseError(e)
+
+    override def handleErrorWith[A](fa: StateT[F, S, A])(
+        f: Throwable => StateT[F, S, A]
+    ): StateT[F, S, A] =
+      MonadError[StateT[F, S, *], Throwable].handleErrorWith(fa)(f)
+
+    override def flatMap[A, B](fa: StateT[F, S, A])(
+        f: A => StateT[F, S, B]
+    ): StateT[F, S, B] = Monad[StateT[F, S, *]].flatMap(fa)(f)
+
+    override def tailRecM[A, B](a: A)(
+        f: A => StateT[F, S, Either[A, B]]
+    ): StateT[F, S, B] = Monad[StateT[F, S, *]].tailRecM(a)(f)
+
+    override def monotonic: StateT[F, S, FiniteDuration] =
+      StateT.liftF(F.monotonic)
+
+    override def realTime: StateT[F, S, Instant] = StateT.liftF(F.realTime)
+
+    override def delay[A](thunk: => A): StateT[F, S, A] =
+      StateT.liftF(F.delay(thunk))
+
+    override def defer[A](thunk: => StateT[F, S, A]): StateT[F, S, A] =
+      StateT.applyF(F.defer(thunk.runF))
   }
 
   trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] {
