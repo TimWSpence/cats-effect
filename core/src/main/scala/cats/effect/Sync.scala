@@ -17,7 +17,7 @@
 package cats.effect
 
 import cats.{Defer, Monad, MonadError}
-import cats.data.{OptionT, EitherT}
+import cats.data.{OptionT, EitherT, ReaderT, Kleisli}
 import scala.concurrent.duration.FiniteDuration
 import java.time.Instant
 
@@ -38,6 +38,11 @@ object Sync {
 
   implicit def eitherTSync[F[_]: Sync, E]: Sync[EitherT[F, E, *]] =
     new EitherTSync[F, E] {
+      override def F: Sync[F] = Sync[F]
+    }
+
+  implicit def kleisliSync[F[_]: Sync, R]: Sync[Kleisli[F, R, *]] =
+    new KleisliSync[F, R] {
       override def F: Sync[F] = Sync[F]
     }
 
@@ -106,5 +111,39 @@ object Sync {
 
     override def defer[A](thunk: => EitherT[F, E, A]): EitherT[F, E, A] =
       EitherT(F.defer(thunk.value))
+  }
+
+  trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] {
+    implicit protected def F: Sync[F]
+
+    override def pure[A](x: A): Kleisli[F, R, A] =
+      Monad[Kleisli[F, R, *]].pure(x)
+
+    override def raiseError[A](e: Throwable): Kleisli[F, R, A] =
+      MonadError[Kleisli[F, R, *], Throwable].raiseError(e)
+
+    override def handleErrorWith[A](fa: Kleisli[F, R, A])(
+        f: Throwable => Kleisli[F, R, A]
+    ): Kleisli[F, R, A] =
+      MonadError[Kleisli[F, R, *], Throwable].handleErrorWith(fa)(f)
+
+    override def flatMap[A, B](fa: Kleisli[F, R, A])(
+        f: A => Kleisli[F, R, B]
+    ): Kleisli[F, R, B] = Monad[Kleisli[F, R, *]].flatMap(fa)(f)
+
+    override def tailRecM[A, B](a: A)(
+        f: A => Kleisli[F, R, Either[A, B]]
+    ): Kleisli[F, R, B] = Monad[Kleisli[F, R, *]].tailRecM(a)(f)
+
+    override def monotonic: Kleisli[F, R, FiniteDuration] =
+      Kleisli.liftF(F.monotonic)
+
+    override def realTime: Kleisli[F, R, Instant] = Kleisli.liftF(F.realTime)
+
+    override def delay[A](thunk: => A): Kleisli[F, R, A] =
+      Kleisli.liftF(F.delay(thunk))
+
+    override def defer[A](thunk: => Kleisli[F, R, A]): Kleisli[F, R, A] =
+      Kleisli { r => F.defer(thunk.run(r)) }
   }
 }
