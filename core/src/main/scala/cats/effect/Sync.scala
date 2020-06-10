@@ -17,10 +17,10 @@
 package cats.effect
 
 import cats.{Defer, Monad, MonadError}
-import cats.data.{OptionT, EitherT, ReaderT, Kleisli, StateT, WriterT}
+import cats.data.{OptionT, EitherT, ReaderT, Kleisli, StateT, WriterT, IorT}
 import scala.concurrent.duration.FiniteDuration
 import java.time.Instant
-import cats.kernel.Monoid
+import cats.kernel.{Monoid, Semigroup}
 
 trait Sync[F[_]] extends MonadError[F, Throwable] with Clock[F] with Defer[F] {
   def delay[A](thunk: => A): F[A]
@@ -51,6 +51,12 @@ object Sync {
     new WriterTSync[F, S] {
       override def F: Sync[F] = Sync[F]
       override def M: Monoid[S] = Monoid[S]
+    }
+
+  implicit def iorTSync[F[_]: Sync, L: Semigroup]: Sync[IorT[F, L, *]] =
+    new IorTSync[F, L] {
+      override def F: Sync[F] = Sync[F]
+      override def S: Semigroup[L] = Semigroup[L]
     }
 
   implicit def kleisliSync[F[_]: Sync, R]: Sync[Kleisli[F, R, *]] =
@@ -192,6 +198,41 @@ object Sync {
 
     override def defer[A](thunk: => WriterT[F, S, A]): WriterT[F, S, A] =
       WriterT(F.defer(thunk.run))
+  }
+
+  trait IorTSync[F[_], L] extends Sync[IorT[F, L, *]] {
+    implicit protected def F: Sync[F]
+    implicit protected def S: Semigroup[L]
+
+    override def pure[A](x: A): IorT[F, L, A] =
+      Monad[IorT[F, L, *]].pure(x)
+
+    override def raiseError[A](e: Throwable): IorT[F, L, A] =
+      MonadError[IorT[F, L, *], Throwable].raiseError(e)
+
+    override def handleErrorWith[A](fa: IorT[F, L, A])(
+        f: Throwable => IorT[F, L, A]
+    ): IorT[F, L, A] =
+      MonadError[IorT[F, L, *], Throwable].handleErrorWith(fa)(f)
+
+    override def flatMap[A, B](fa: IorT[F, L, A])(
+        f: A => IorT[F, L, B]
+    ): IorT[F, L, B] = Monad[IorT[F, L, *]].flatMap(fa)(f)
+
+    override def tailRecM[A, B](a: A)(
+        f: A => IorT[F, L, Either[A, B]]
+    ): IorT[F, L, B] = Monad[IorT[F, L, *]].tailRecM(a)(f)
+
+    override def monotonic: IorT[F, L, FiniteDuration] =
+      IorT.liftF(F.monotonic)
+
+    override def realTime: IorT[F, L, Instant] = IorT.liftF(F.realTime)
+
+    override def delay[A](thunk: => A): IorT[F, L, A] =
+      IorT.liftF(F.delay(thunk))
+
+    override def defer[A](thunk: => IorT[F, L, A]): IorT[F, L, A] =
+      IorT(F.defer(thunk.value))
   }
 
   trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] {
