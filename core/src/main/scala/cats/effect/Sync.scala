@@ -17,9 +17,10 @@
 package cats.effect
 
 import cats.{Defer, Monad, MonadError}
-import cats.data.{OptionT, EitherT, ReaderT, Kleisli, StateT}
+import cats.data.{OptionT, EitherT, ReaderT, Kleisli, StateT, WriterT}
 import scala.concurrent.duration.FiniteDuration
 import java.time.Instant
+import cats.kernel.Monoid
 
 trait Sync[F[_]] extends MonadError[F, Throwable] with Clock[F] with Defer[F] {
   def delay[A](thunk: => A): F[A]
@@ -44,6 +45,12 @@ object Sync {
   implicit def stateTSync[F[_]: Sync, S]: Sync[StateT[F, S, *]] =
     new StateTSync[F, S] {
       override def F: Sync[F] = Sync[F]
+    }
+
+  implicit def writerTSync[F[_]: Sync, S: Monoid]: Sync[WriterT[F, S, *]] =
+    new WriterTSync[F, S] {
+      override def F: Sync[F] = Sync[F]
+      override def M: Monoid[S] = Monoid[S]
     }
 
   implicit def kleisliSync[F[_]: Sync, R]: Sync[Kleisli[F, R, *]] =
@@ -150,6 +157,41 @@ object Sync {
 
     override def defer[A](thunk: => StateT[F, S, A]): StateT[F, S, A] =
       StateT.applyF(F.defer(thunk.runF))
+  }
+
+  trait WriterTSync[F[_], S] extends Sync[WriterT[F, S, *]] {
+    implicit protected def F: Sync[F]
+    implicit protected def M: Monoid[S]
+
+    override def pure[A](x: A): WriterT[F, S, A] =
+      Monad[WriterT[F, S, *]].pure(x)
+
+    override def raiseError[A](e: Throwable): WriterT[F, S, A] =
+      MonadError[WriterT[F, S, *], Throwable].raiseError(e)
+
+    override def handleErrorWith[A](fa: WriterT[F, S, A])(
+        f: Throwable => WriterT[F, S, A]
+    ): WriterT[F, S, A] =
+      MonadError[WriterT[F, S, *], Throwable].handleErrorWith(fa)(f)
+
+    override def flatMap[A, B](fa: WriterT[F, S, A])(
+        f: A => WriterT[F, S, B]
+    ): WriterT[F, S, B] = Monad[WriterT[F, S, *]].flatMap(fa)(f)
+
+    override def tailRecM[A, B](a: A)(
+        f: A => WriterT[F, S, Either[A, B]]
+    ): WriterT[F, S, B] = Monad[WriterT[F, S, *]].tailRecM(a)(f)
+
+    override def monotonic: WriterT[F, S, FiniteDuration] =
+      WriterT.liftF(F.monotonic)
+
+    override def realTime: WriterT[F, S, Instant] = WriterT.liftF(F.realTime)
+
+    override def delay[A](thunk: => A): WriterT[F, S, A] =
+      WriterT.liftF(F.delay(thunk))
+
+    override def defer[A](thunk: => WriterT[F, S, A]): WriterT[F, S, A] =
+      WriterT(F.defer(thunk.run))
   }
 
   trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] {
