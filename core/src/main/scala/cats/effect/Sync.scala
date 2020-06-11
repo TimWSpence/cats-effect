@@ -50,13 +50,13 @@ object Sync {
   implicit def writerTSync[F[_]: Sync, S: Monoid]: Sync[WriterT[F, S, *]] =
     new WriterTSync[F, S] {
       override def F: Sync[F] = Sync[F]
-      override def M: Monoid[S] = Monoid[S]
+      override def S: Monoid[S] = Monoid[S]
     }
 
   implicit def iorTSync[F[_]: Sync, L: Semigroup]: Sync[IorT[F, L, *]] =
     new IorTSync[F, L] {
       override def F: Sync[F] = Sync[F]
-      override def S: Semigroup[L] = Semigroup[L]
+      override def L: Semigroup[L] = Semigroup[L]
     }
 
   implicit def kleisliSync[F[_]: Sync, R]: Sync[Kleisli[F, R, *]] =
@@ -64,10 +64,8 @@ object Sync {
       override def F: Sync[F] = Sync[F]
     }
 
-  trait OptionTSync[F[_]] extends Sync[OptionT[F, *]] {
-    implicit protected def F: Sync[F]
-
-    override def pure[A](x: A): OptionT[F, A] = Monad[OptionT[F, *]].pure(x)
+  trait OptionTSync[F[_]] extends Sync[OptionT[F, *]] with Clock.OptionTClock[F]{
+    override implicit protected def F: Sync[F]
 
     override def raiseError[A](e: Throwable): OptionT[F, A] =
       MonadError[OptionT[F, *], Throwable].raiseError(e)
@@ -85,11 +83,6 @@ object Sync {
         f: A => OptionT[F, Either[A, B]]
     ): OptionT[F, B] = Monad[OptionT[F, *]].tailRecM(a)(f)
 
-    override def monotonic: OptionT[F, FiniteDuration] =
-      OptionT.liftF(F.monotonic)
-
-    override def realTime: OptionT[F, Instant] = OptionT.liftF(F.realTime)
-
     override def delay[A](thunk: => A): OptionT[F, A] =
       OptionT.liftF(F.delay(thunk))
 
@@ -97,11 +90,8 @@ object Sync {
       OptionT(F.defer(thunk.value))
   }
 
-  trait EitherTSync[F[_], E] extends Sync[EitherT[F, E, *]] {
-    implicit protected def F: Sync[F]
-
-    override def pure[A](x: A): EitherT[F, E, A] =
-      Monad[EitherT[F, E, *]].pure(x)
+  trait EitherTSync[F[_], E] extends Sync[EitherT[F, E, *]] with Clock.EitherTClock[F, E] {
+    override implicit protected def F: Sync[F]
 
     override def raiseError[A](e: Throwable): EitherT[F, E, A] =
       MonadError[EitherT[F, E, *], Throwable].raiseError(e)
@@ -119,11 +109,6 @@ object Sync {
         f: A => EitherT[F, E, Either[A, B]]
     ): EitherT[F, E, B] = Monad[EitherT[F, E, *]].tailRecM(a)(f)
 
-    override def monotonic: EitherT[F, E, FiniteDuration] =
-      EitherT.liftF(F.monotonic)
-
-    override def realTime: EitherT[F, E, Instant] = EitherT.liftF(F.realTime)
-
     override def delay[A](thunk: => A): EitherT[F, E, A] =
       EitherT.liftF(F.delay(thunk))
 
@@ -131,11 +116,8 @@ object Sync {
       EitherT(F.defer(thunk.value))
   }
 
-  trait StateTSync[F[_], S] extends Sync[StateT[F, S, *]] {
-    implicit protected def F: Sync[F]
-
-    override def pure[A](x: A): StateT[F, S, A] =
-      Monad[StateT[F, S, *]].pure(x)
+  trait StateTSync[F[_], S] extends Sync[StateT[F, S, *]] with Clock.StateTClock[F, S] {
+    override implicit protected def F: Sync[F]
 
     override def raiseError[A](e: Throwable): StateT[F, S, A] =
       MonadError[StateT[F, S, *], Throwable].raiseError(e)
@@ -153,11 +135,6 @@ object Sync {
         f: A => StateT[F, S, Either[A, B]]
     ): StateT[F, S, B] = Monad[StateT[F, S, *]].tailRecM(a)(f)
 
-    override def monotonic: StateT[F, S, FiniteDuration] =
-      StateT.liftF(F.monotonic)
-
-    override def realTime: StateT[F, S, Instant] = StateT.liftF(F.realTime)
-
     override def delay[A](thunk: => A): StateT[F, S, A] =
       StateT.liftF(F.delay(thunk))
 
@@ -165,12 +142,8 @@ object Sync {
       StateT.applyF(F.defer(thunk.runF))
   }
 
-  trait WriterTSync[F[_], S] extends Sync[WriterT[F, S, *]] {
-    implicit protected def F: Sync[F]
-    implicit protected def M: Monoid[S]
-
-    override def pure[A](x: A): WriterT[F, S, A] =
-      Monad[WriterT[F, S, *]].pure(x)
+  trait WriterTSync[F[_], S] extends Sync[WriterT[F, S, *]] with Clock.WriterTClock[F, S] {
+    override implicit protected def F: Sync[F]
 
     override def raiseError[A](e: Throwable): WriterT[F, S, A] =
       MonadError[WriterT[F, S, *], Throwable].raiseError(e)
@@ -188,11 +161,6 @@ object Sync {
         f: A => WriterT[F, S, Either[A, B]]
     ): WriterT[F, S, B] = Monad[WriterT[F, S, *]].tailRecM(a)(f)
 
-    override def monotonic: WriterT[F, S, FiniteDuration] =
-      WriterT.liftF(F.monotonic)
-
-    override def realTime: WriterT[F, S, Instant] = WriterT.liftF(F.realTime)
-
     override def delay[A](thunk: => A): WriterT[F, S, A] =
       WriterT.liftF(F.delay(thunk))
 
@@ -200,9 +168,8 @@ object Sync {
       WriterT(F.defer(thunk.run))
   }
 
-  trait IorTSync[F[_], L] extends Sync[IorT[F, L, *]] {
-    implicit protected def F: Sync[F]
-    implicit protected def S: Semigroup[L]
+  trait IorTSync[F[_], L] extends Sync[IorT[F, L, *]] with Clock.IorTClock[F, L] {
+    override implicit protected def F: Sync[F]
 
     override def pure[A](x: A): IorT[F, L, A] =
       Monad[IorT[F, L, *]].pure(x)
@@ -235,11 +202,8 @@ object Sync {
       IorT(F.defer(thunk.value))
   }
 
-  trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] {
-    implicit protected def F: Sync[F]
-
-    override def pure[A](x: A): Kleisli[F, R, A] =
-      Monad[Kleisli[F, R, *]].pure(x)
+  trait KleisliSync[F[_], R] extends Sync[Kleisli[F, R, *]] with Clock.KleisliClock[F, R] {
+    override implicit protected def F: Sync[F]
 
     override def raiseError[A](e: Throwable): Kleisli[F, R, A] =
       MonadError[Kleisli[F, R, *], Throwable].raiseError(e)
@@ -256,11 +220,6 @@ object Sync {
     override def tailRecM[A, B](a: A)(
         f: A => Kleisli[F, R, Either[A, B]]
     ): Kleisli[F, R, B] = Monad[Kleisli[F, R, *]].tailRecM(a)(f)
-
-    override def monotonic: Kleisli[F, R, FiniteDuration] =
-      Kleisli.liftF(F.monotonic)
-
-    override def realTime: Kleisli[F, R, Instant] = Kleisli.liftF(F.realTime)
 
     override def delay[A](thunk: => A): Kleisli[F, R, A] =
       Kleisli.liftF(F.delay(thunk))
