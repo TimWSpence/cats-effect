@@ -8,3 +8,8 @@ target/
 
 # Ignore [ce]tags files
 tags
+
+# Metals
+.bloop/
+.metals/
+project/metals.sbt
