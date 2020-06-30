@@ -32,6 +32,10 @@ trait Concurrent[F[_], E] extends MonadError[F, E] { self: Safe[F, E] =>
 
   def start[A](fa: F[A]): F[Fiber[F, E, A]]
 
+  def background[A](fa: F[A]): Resource[F, F[A]] = ???
+
+  def cancelable[A](k: (Either[Throwable, A] => Unit) => F[Unit]): F[A] = ???
+
   def uncancelable[A](body: (F ~> F) => F[A]): F[A]
 
   // produces an effect which is already canceled (and doesn't introduce an async boundary)
@@ -77,6 +81,8 @@ trait Concurrent[F[_], E] extends MonadError[F, E] { self: Safe[F, E] =>
           )
         }
     }
+
+  def continual[A, B](fa: F[A])(f: Either[Throwable, A] => F[B]): F[B] = ???
 }
 
 object Concurrent {

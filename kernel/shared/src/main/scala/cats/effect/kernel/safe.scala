@@ -45,6 +45,17 @@ trait Bracket[F[_], E] extends Safe[F, E] {
 
   def onCase[A](fa: F[A])(pf: PartialFunction[Case[A], F[Unit]]): F[A] =
     bracketCase(unit)(_ => fa)((_, c) => pf.lift(c).getOrElse(unit))
+
+  def uncancelable[A](fa: F[A]): F[A] =
+    bracket(fa)(pure)(_ => unit)
+
+  def guarantee[A](fa: F[A])(finalizer: F[Unit]): F[A] =
+    bracket(unit)(_ => fa)(_ => finalizer)
+
+  def guaranteeCase[A](fa: F[A])(finalizer: ExitCase[E] => F[Unit]): F[A] = ???
+
+  def onCancel[A](fa: F[A])(finalizer: F[Unit]): F[A] = ???
+
 }
 
 object Bracket {

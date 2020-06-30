@@ -33,7 +33,7 @@
 package cats.effect.syntax
 
 import scala.concurrent.ExecutionContext
-import cats.effect.Temporal
+import cats.effect.kernel.Temporal
 import scala.concurrent.duration.FiniteDuration
 
 trait TemporalSyntax {
