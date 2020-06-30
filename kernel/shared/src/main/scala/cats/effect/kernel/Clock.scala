@@ -21,7 +21,6 @@ import cats.data._
 
 import scala.concurrent.duration.FiniteDuration
 
-import java.time.Instant
 import cats.kernel.Monoid
 import cats.kernel.Semigroup
 
@@ -86,7 +85,7 @@ object Clock {
     override def monotonic: OptionT[F, FiniteDuration] =
       OptionT.liftF(F.monotonic)
 
-    override def realTime: OptionT[F, Instant] = OptionT.liftF(F.realTime)
+    override def realTime: OptionT[F, FiniteDuration] = OptionT.liftF(F.realTime)
   }
 
   trait EitherTClock[F[_], E] extends Clock[EitherT[F, E, *]] {
@@ -103,7 +102,7 @@ object Clock {
     override def monotonic: EitherT[F, E, FiniteDuration] =
       EitherT.liftF(F.monotonic)
 
-    override def realTime: EitherT[F, E, Instant] = EitherT.liftF(F.realTime)
+    override def realTime: EitherT[F, E, FiniteDuration] = EitherT.liftF(F.realTime)
   }
 
   trait StateTClock[F[_], S] extends Clock[StateT[F, S, *]] {
@@ -120,7 +119,7 @@ object Clock {
     override def monotonic: IndexedStateT[F, S, S, FiniteDuration] =
       StateT.liftF(F.monotonic)
 
-    override def realTime: IndexedStateT[F, S, S, Instant] =
+    override def realTime: IndexedStateT[F, S, S, FiniteDuration] =
       StateT.liftF(F.realTime)
   }
 
@@ -139,7 +138,7 @@ object Clock {
     override def monotonic: WriterT[F, S, FiniteDuration] =
       WriterT.liftF(F.monotonic)
 
-    override def realTime: WriterT[F, S, Instant] = WriterT.liftF(F.realTime)
+    override def realTime: WriterT[F, S, FiniteDuration] = WriterT.liftF(F.realTime)
   }
 
   trait IorTClock[F[_], L] extends Clock[IorT[F, L, *]] {
@@ -156,7 +155,7 @@ object Clock {
 
     override def monotonic: IorT[F, L, FiniteDuration] = IorT.liftF(F.monotonic)
 
-    override def realTime: IorT[F, L, Instant] = IorT.liftF(F.realTime)
+    override def realTime: IorT[F, L, FiniteDuration] = IorT.liftF(F.realTime)
 
   }
 
@@ -174,7 +173,7 @@ object Clock {
     override def monotonic: Kleisli[F, R, FiniteDuration] =
       Kleisli.liftF(F.monotonic)
 
-    override def realTime: Kleisli[F, R, Instant] = Kleisli.liftF(F.realTime)
+    override def realTime: Kleisli[F, R, FiniteDuration] = Kleisli.liftF(F.realTime)
 
   }
 }
