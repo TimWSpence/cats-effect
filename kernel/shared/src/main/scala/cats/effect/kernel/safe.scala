@@ -91,9 +91,14 @@ object Bracket {
     }
 
   implicit def bracketForOptionT[F[_], E](
-      implicit F: Bracket[F, E])
-      : Bracket.Aux[OptionT[F, *], E, OptionT[F.Case, *]] =
-    new Bracket[OptionT[F, *], E] {
+      implicit B: Bracket[F, E])
+      : Bracket[OptionT[F, *], E] = new OptionTBracket[F, E] {
+    override implicit protected val F: Bracket[F, E] = B
+  }
+
+  trait OptionTBracket[F[_], E] extends Bracket[OptionT[F, *], E] {
+
+      implicit protected val F: Bracket[F, E]
 
       private[this] val delegate = OptionT.catsDataMonadErrorForOptionT[F, E]
 

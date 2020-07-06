@@ -36,22 +36,22 @@ trait Clock[F[_]] extends Applicative[F] {
 object Clock {
   def apply[F[_]](implicit F: Clock[F]): F.type = F
 
-  implicit def optionTClock[F[_]: Clock]: Clock[OptionT[F, *]] =
+  implicit def clockForOptionT[F[_]: Clock]: Clock[OptionT[F, *]] =
     new OptionTClock[F] {
       override def F: Clock[F] = Clock[F]
     }
 
-  implicit def eitherTClock[F[_]: Clock, E]: Clock[EitherT[F, E, *]] =
+  implicit def clockForEitherT[F[_]: Clock, E]: Clock[EitherT[F, E, *]] =
     new EitherTClock[F, E] {
       override def F: Clock[F] = Clock[F]
     }
 
-  implicit def stateTClock[F[_]: Clock, S]: Clock[StateT[F, S, *]] =
+  implicit def clockForStateT[F[_]: Clock, S]: Clock[StateT[F, S, *]] =
     new StateTClock[F, S] {
       override def F: Clock[F] = Clock[F]
     }
 
-  implicit def writerT[F[_]: Clock, S: Monoid]: Clock[WriterT[F, S, *]] =
+  implicit def clockForWriterT[F[_]: Clock, S: Monoid]: Clock[WriterT[F, S, *]] =
     new WriterTClock[F, S] {
       override def F: Clock[F] = Clock[F]
 
@@ -59,14 +59,14 @@ object Clock {
 
     }
 
-  implicit def iorT[F[_]: Clock, L: Semigroup]: Clock[IorT[F, L, *]] =
+  implicit def clockForIorT[F[_]: Clock, L: Semigroup]: Clock[IorT[F, L, *]] =
     new IorTClock[F, L] {
       override def F: Clock[F] = Clock[F]
 
       override def L: Semigroup[L] = Semigroup[L]
     }
 
-  implicit def kleisliClock[F[_]: Clock, R]: Clock[Kleisli[F, R, *]] =
+  implicit def clockForKleisli[F[_]: Clock, R]: Clock[Kleisli[F, R, *]] =
     new KleisliClock[F, R] {
       override def F: Clock[F] = Clock[F]
     }
