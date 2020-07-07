@@ -19,7 +19,7 @@ package cats.effect.kernel
 import cats.{ApplicativeError, MonadError}
 import cats.data._
 import cats.implicits._
-import cats.{Functor, Semigroup, Monoid, Semigroupal}
+import cats.{Functor, Monoid, Semigroup, Semigroupal}
 
 // represents the type Bracket | Region
 sealed trait Safe[F[_], E] extends MonadError[F, E] {
@@ -185,18 +185,17 @@ object Bracket {
       def bracketCase[A, B](acquire: EitherT[F, E0, A])(use: A => EitherT[F, E0, B])(
         release: (A, Case[B]) => EitherT[F, E0, Unit]
       ): EitherT[F, E0, B] =
-      EitherT {
-        F.bracketCase(
-          acquire.value)(
-          (optA: Either[E0, A]) => optA.flatTraverse(a => use(a).value)(F, catsStdInstancesForEither[E0]))(
-          { (optA: Either[E0, A], resultOpt: F.Case[Either[E0, B]]) =>
+        EitherT {
+          F.bracketCase(acquire.value)((optA: Either[E0, A]) =>
+            optA.flatTraverse(a => use(a).value)(F, catsStdInstancesForEither[E0])
+          ) { (optA: Either[E0, A], resultOpt: F.Case[Either[E0, B]]) =>
             val resultsF = optA.flatTraverse { a =>
               release(a, EitherT(resultOpt)).value
             }(F, catsStdInstancesForEither[E0])
 
             resultsF.void
-          })
-      }
+          }
+        }
 
       def flatMap[A, B](fa: EitherT[F, E0, A])(f: A => EitherT[F, E0, B]): EitherT[F, E0, B] =
         delegate.flatMap(fa)(f)
@@ -221,18 +220,18 @@ object Bracket {
           StateT.pure[F.Case, S, A](x)(F.CaseInstance)
 
         def handleErrorWith[A](fa: StateT[F.Case, S, A])(f: E => StateT[F.Case, S, A]): StateT[F.Case, S, A] = ???
-          // StateT(s => F.CaseInstance.ap(fa.runF)(F.CaseInstance.pure(s)))
-          // StateT(F.CaseInstance.handleErrorWith(fa.value)(f.andThen(_.value)))
+        // StateT(s => F.CaseInstance.ap(fa.runF)(F.CaseInstance.pure(s)))
+        // StateT(F.CaseInstance.handleErrorWith(fa.value)(f.andThen(_.value)))
 
         def raiseError[A](e: E): StateT[F.Case, S, A] =
           StateT.liftF(F.CaseInstance.raiseError[A](e))(F.CaseInstance)
 
         def ap[A, B](ff: StateT[F.Case, S, A => B])(fa: StateT[F.Case, S, A]): StateT[F.Case, S, B] = ???
-          // OptionT {
-          //   F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
-          //     case (optfab, opta) => (optfab, opta).mapN(_(_))
-          //   }
-          // }
+        // OptionT {
+        //   F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
+        //     case (optfab, opta) => (optfab, opta).mapN(_(_))
+        //   }
+        // }
       }
 
       def pure[A](x: A): StateT[F, S, A] =
@@ -247,16 +246,16 @@ object Bracket {
       def bracketCase[A, B](
         acquire: StateT[F, S, A]
       )(use: A => StateT[F, S, B])(release: (A, Case[B]) => StateT[F, S, Unit]): StateT[F, S, B] = ???
-        // OptionT {
-        //   F.bracketCase(acquire.value)((optA: Option[A]) => optA.flatTraverse(a => use(a).value)) {
-        //     (optA: Option[A], resultOpt: F.Case[Option[B]]) =>
-        //       val resultsF = optA.flatTraverse { a =>
-        //         release(a, OptionT(resultOpt)).value
-        //       }
+      // OptionT {
+      //   F.bracketCase(acquire.value)((optA: Option[A]) => optA.flatTraverse(a => use(a).value)) {
+      //     (optA: Option[A], resultOpt: F.Case[Option[B]]) =>
+      //       val resultsF = optA.flatTraverse { a =>
+      //         release(a, OptionT(resultOpt)).value
+      //       }
 
-        //       resultsF.void
-        //   }
-        // }
+      //       resultsF.void
+      //   }
+      // }
 
       def flatMap[A, B](fa: StateT[F, S, A])(f: A => StateT[F, S, B]): StateT[F, S, B] =
         delegate.flatMap(fa)(f)
@@ -290,7 +289,7 @@ object Bracket {
         def ap[A, B](ff: WriterT[F.Case, S, A => B])(fa: WriterT[F.Case, S, A]): WriterT[F.Case, S, B] =
           WriterT {
             F.CaseInstance.map(F.CaseInstance.product(ff.run, fa.run)) {
-              case (optfab, opta) => (optfab, opta).mapN(_(_))
+              case (fab, fa) => (fab, fa).mapN(_(_))
             }
           }
       }
@@ -349,7 +348,7 @@ object Bracket {
         def ap[A, B](ff: IorT[F.Case, L, A => B])(fa: IorT[F.Case, L, A]): IorT[F.Case, L, B] =
           IorT {
             F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
-              case (optfab, opta) => (optfab, opta).mapN(_(_))
+              case (iorab, iora) => (iorab, iora).mapN(_(_))
             }
           }
       }
@@ -367,10 +366,10 @@ object Bracket {
         acquire: IorT[F, L, A]
       )(use: A => IorT[F, L, B])(release: (A, Case[B]) => IorT[F, L, Unit]): IorT[F, L, B] =
         IorT {
-          F.bracketCase(acquire.value)((optA: Ior[L, A]) => optA.flatTraverse(a => use(a).value)) {
-            (optA: Ior[L, A], resultOpt: F.Case[Ior[L, B]]) =>
-              val resultsF = optA.flatTraverse { a =>
-                release(a, IorT(resultOpt)).value
+          F.bracketCase(acquire.value)((ior: Ior[L, A]) => ior.flatTraverse(a => use(a).value)) {
+            (ior: Ior[L, A], resultIor: F.Case[Ior[L, B]]) =>
+              val resultsF = ior.flatTraverse { a =>
+                release(a, IorT(resultIor)).value
               }
 
               resultsF.void
@@ -381,6 +380,61 @@ object Bracket {
         delegate.flatMap(fa)(f)
 
       def tailRecM[A, B](a: A)(f: A => IorT[F, L, Either[A, B]]): IorT[F, L, B] =
+        delegate.tailRecM(a)(f)
+    }
+
+  implicit def bracketForKleisli[F[_], R, E](
+    implicit F: Bracket[F, E]
+  ): Bracket.Aux[Kleisli[F, R, *], E, Kleisli[F.Case, R, *]] =
+    new Bracket[Kleisli[F, R, *], E] {
+
+      private[this] val delegate = Kleisli.catsDataMonadErrorForKleisli[F, R, E]
+
+      type Case[A] = Kleisli[F.Case, R, A]
+
+      // TODO put this into cats-core
+      def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
+
+        def pure[A](x: A): Kleisli[F.Case, R, A] = Kleisli.pure[F.Case, R, A](x)(F.CaseInstance)
+
+        def handleErrorWith[A](fa: Kleisli[F.Case, R, A])(f: E => Kleisli[F.Case, R, A]): Kleisli[F.Case, R, A] =
+          Kleisli(r => F.CaseInstance.handleErrorWith(fa.run(r))(f.andThen(_.run(r))))
+
+        def raiseError[A](e: E): Kleisli[F.Case, R, A] =
+          Kleisli.liftF(F.CaseInstance.raiseError[A](e))
+
+        def ap[A, B](ff: Kleisli[F.Case, R, A => B])(fa: Kleisli[F.Case, R, A]): Kleisli[F.Case, R, B] =
+          Kleisli { r =>
+            F.CaseInstance.map(F.CaseInstance.product(ff.run(r), fa.run(r))) {
+              case (fab, a) => fab(a)
+            }
+          }
+      }
+
+      def pure[A](x: A): Kleisli[F, R, A] =
+        delegate.pure(x)
+
+      def handleErrorWith[A](fa: Kleisli[F, R, A])(f: E => Kleisli[F, R, A]): Kleisli[F, R, A] =
+        delegate.handleErrorWith(fa)(f)
+
+      def raiseError[A](e: E): Kleisli[F, R, A] =
+        delegate.raiseError(e)
+
+      def bracketCase[A, B](
+        acquire: Kleisli[F, R, A]
+      )(use: A => Kleisli[F, R, B])(release: (A, Case[B]) => Kleisli[F, R, Unit]): Kleisli[F, R, B] =
+        Kleisli { r =>
+          F.bracketCase(acquire.run(r))((a: A) => use(a).run(r)) { (a: A, result: F.Case[B]) =>
+            val resultsF = release(a, Kleisli.liftF(result)).run(r)
+
+            resultsF.void
+          }
+        }
+
+      def flatMap[A, B](fa: Kleisli[F, R, A])(f: A => Kleisli[F, R, B]): Kleisli[F, R, B] =
+        delegate.flatMap(fa)(f)
+
+      def tailRecM[A, B](a: A)(f: A => Kleisli[F, R, Either[A, B]]): Kleisli[F, R, B] =
         delegate.tailRecM(a)(f)
     }
 }
