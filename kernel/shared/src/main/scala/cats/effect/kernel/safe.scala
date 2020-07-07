@@ -19,7 +19,7 @@ package cats.effect.kernel
 import cats.{ApplicativeError, MonadError}
 import cats.data._
 import cats.implicits._
-import cats.{Functor, Monoid, Semigroupal}
+import cats.{Functor, Semigroup, Monoid, Semigroupal}
 
 // represents the type Bracket | Region
 sealed trait Safe[F[_], E] extends MonadError[F, E] {
@@ -322,6 +322,65 @@ object Bracket {
         delegate.flatMap(fa)(f)
 
       def tailRecM[A, B](a: A)(f: A => WriterT[F, S, Either[A, B]]): WriterT[F, S, B] =
+        delegate.tailRecM(a)(f)
+    }
+
+  implicit def bracketForIorT[F[_], L, E](
+    implicit F: Bracket[F, E],
+    L: Semigroup[L]
+  ): Bracket.Aux[IorT[F, L, *], E, IorT[F.Case, L, *]] =
+    new Bracket[IorT[F, L, *], E] {
+
+      private[this] val delegate = IorT.catsDataMonadErrorFForIorT[F, L, E]
+
+      type Case[A] = IorT[F.Case, L, A]
+
+      // TODO put this into cats-core
+      def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
+
+        def pure[A](x: A): IorT[F.Case, L, A] = IorT.pure[F.Case, L](x)(F.CaseInstance)
+
+        def handleErrorWith[A](fa: IorT[F.Case, L, A])(f: E => IorT[F.Case, L, A]): IorT[F.Case, L, A] =
+          IorT(F.CaseInstance.handleErrorWith(fa.value)(f.andThen(_.value)))
+
+        def raiseError[A](e: E): IorT[F.Case, L, A] =
+          IorT.liftF(F.CaseInstance.raiseError[A](e))(F.CaseInstance)
+
+        def ap[A, B](ff: IorT[F.Case, L, A => B])(fa: IorT[F.Case, L, A]): IorT[F.Case, L, B] =
+          IorT {
+            F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
+              case (optfab, opta) => (optfab, opta).mapN(_(_))
+            }
+          }
+      }
+
+      def pure[A](x: A): IorT[F, L, A] =
+        delegate.pure(x)
+
+      def handleErrorWith[A](fa: IorT[F, L, A])(f: E => IorT[F, L, A]): IorT[F, L, A] =
+        delegate.handleErrorWith(fa)(f)
+
+      def raiseError[A](e: E): IorT[F, L, A] =
+        delegate.raiseError(e)
+
+      def bracketCase[A, B](
+        acquire: IorT[F, L, A]
+      )(use: A => IorT[F, L, B])(release: (A, Case[B]) => IorT[F, L, Unit]): IorT[F, L, B] =
+        IorT {
+          F.bracketCase(acquire.value)((optA: Ior[L, A]) => optA.flatTraverse(a => use(a).value)) {
+            (optA: Ior[L, A], resultOpt: F.Case[Ior[L, B]]) =>
+              val resultsF = optA.flatTraverse { a =>
+                release(a, IorT(resultOpt)).value
+              }
+
+              resultsF.void
+          }
+        }
+
+      def flatMap[A, B](fa: IorT[F, L, A])(f: A => IorT[F, L, B]): IorT[F, L, B] =
+        delegate.flatMap(fa)(f)
+
+      def tailRecM[A, B](a: A)(f: A => IorT[F, L, Either[A, B]]): IorT[F, L, B] =
         delegate.tailRecM(a)(f)
     }
 }
