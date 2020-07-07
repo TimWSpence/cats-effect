@@ -17,8 +17,9 @@
 package cats.effect.kernel
 
 import cats.{ApplicativeError, MonadError}
-import cats.data.OptionT
+import cats.data._
 import cats.implicits._
+import cats.{Functor, Semigroupal}
 
 // represents the type Bracket | Region
 sealed trait Safe[F[_], E] extends MonadError[F, E] {
@@ -30,17 +31,9 @@ sealed trait Safe[F[_], E] extends MonadError[F, E] {
 
 trait Bracket[F[_], E] extends Safe[F, E] {
 
-  def bracketCase[A, B](
-      acquire: F[A])(
-      use: A => F[B])(
-      release: (A, Case[B]) => F[Unit])
-      : F[B]
+  def bracketCase[A, B](acquire: F[A])(use: A => F[B])(release: (A, Case[B]) => F[Unit]): F[B]
 
-  def bracket[A, B](
-      acquire: F[A])(
-      use: A => F[B])(
-      release: A => F[Unit])
-      : F[B] =
+  def bracket[A, B](acquire: F[A])(use: A => F[B])(release: A => F[Unit]): F[B] =
     bracketCase(acquire)(use)((a, _) => release(a))
 
   def onCase[A](fa: F[A])(pf: PartialFunction[Case[A], F[Unit]]): F[A] =
@@ -74,11 +67,9 @@ object Bracket {
         delegate.raiseError(e)
 
       def bracketCase[A, B](
-          acquire: Either[E, A])(
-          use: A => Either[E, B])(
-          release: (A, Either[E, B]) => Either[E, Unit])
-          : Either[E, B] =
-        acquire flatMap { a =>
+        acquire: Either[E, A]
+      )(use: A => Either[E, B])(release: (A, Either[E, B]) => Either[E, Unit]): Either[E, B] =
+        acquire.flatMap { a =>
           val result: Either[E, B] = use(a)
           productR(attempt(release(a, result)))(result)
         }
@@ -91,8 +82,8 @@ object Bracket {
     }
 
   implicit def bracketForOptionT[F[_], E](
-      implicit F: Bracket[F, E])
-      : Bracket.Aux[OptionT[F, *], E, OptionT[F.Case, *]] =
+    implicit F: Bracket[F, E]
+  ): Bracket.Aux[OptionT[F, *], E, OptionT[F.Case, *]] =
     new Bracket[OptionT[F, *], E] {
 
       private[this] val delegate = OptionT.catsDataMonadErrorForOptionT[F, E]
@@ -122,37 +113,95 @@ object Bracket {
       def pure[A](x: A): OptionT[F, A] =
         delegate.pure(x)
 
-      def handleErrorWith[A](
-          fa: OptionT[F, A])(
-          f: E => OptionT[F, A])
-          : OptionT[F, A] =
+      def handleErrorWith[A](fa: OptionT[F, A])(f: E => OptionT[F, A]): OptionT[F, A] =
         delegate.handleErrorWith(fa)(f)
 
       def raiseError[A](e: E): OptionT[F, A] =
         delegate.raiseError(e)
 
       def bracketCase[A, B](
-          acquire: OptionT[F, A])(
-          use: A => OptionT[F, B])(
-          release: (A, Case[B]) => OptionT[F, Unit])
-          : OptionT[F, B] =
+        acquire: OptionT[F, A]
+      )(use: A => OptionT[F, B])(release: (A, Case[B]) => OptionT[F, Unit]): OptionT[F, B] =
         OptionT {
-          F.bracketCase(
-            acquire.value)(
-            (optA: Option[A]) => optA.flatTraverse(a => use(a).value))(
-            { (optA: Option[A], resultOpt: F.Case[Option[B]]) =>
-              val resultsF = optA flatTraverse { a =>
+          F.bracketCase(acquire.value)((optA: Option[A]) => optA.flatTraverse(a => use(a).value)) {
+            (optA: Option[A], resultOpt: F.Case[Option[B]]) =>
+              val resultsF = optA.flatTraverse { a =>
                 release(a, OptionT(resultOpt)).value
               }
 
               resultsF.void
-            })
+          }
         }
 
       def flatMap[A, B](fa: OptionT[F, A])(f: A => OptionT[F, B]): OptionT[F, B] =
         delegate.flatMap(fa)(f)
 
       def tailRecM[A, B](a: A)(f: A => OptionT[F, Either[A, B]]): OptionT[F, B] =
+        delegate.tailRecM(a)(f)
+    }
+
+  implicit def bracketForEitherT[F[_], E0, E](
+    implicit F: Bracket[F, E]
+  ): Bracket.Aux[EitherT[F, E0, *], E, EitherT[F.Case, E0, *]] =
+    new Bracket[EitherT[F, E0, *], E] {
+
+      private[this] val delegate = EitherT.catsDataMonadErrorFForEitherT[F, E, E0]
+
+      type Case[A] = EitherT[F.Case, E0, A]
+
+      // TODO put this into cats-core
+      def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
+
+        def pure[A](x: A): EitherT[F.Case, E0, A] = EitherT.pure[F.Case, E0](x)(F.CaseInstance)
+
+        def handleErrorWith[A](fa: EitherT[F.Case, E0, A])(f: E => EitherT[F.Case, E0, A]): EitherT[F.Case, E0, A] =
+          EitherT(F.CaseInstance.handleErrorWith(fa.value)(f.andThen(_.value)))
+
+        def raiseError[A](e: E): EitherT[F.Case, E0, A] =
+          EitherT.liftF(F.CaseInstance.raiseError[A](e))(F.CaseInstance)
+
+        def ap[A, B](ff: EitherT[F.Case, E0, A => B])(fa: EitherT[F.Case, E0, A]): EitherT[F.Case, E0, B] = {
+          implicit val eitherInstances: Functor[Either[E0, *]] = catsStdInstancesForEither[E0]
+
+          EitherT {
+            F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
+              case (optfab, opta) =>
+                //Sadly the bracketForEither is also in scope here so we have ambiguous implicits
+                (optfab, opta).mapN(_(_))(catsStdInstancesForEither[E0], catsStdInstancesForEither[E0])
+            }
+          }
+        }
+      }
+
+      def pure[A](x: A): EitherT[F, E0, A] =
+        delegate.pure(x)
+
+      def handleErrorWith[A](fa: EitherT[F, E0, A])(f: E => EitherT[F, E0, A]): EitherT[F, E0, A] =
+        delegate.handleErrorWith(fa)(f)
+
+      def raiseError[A](e: E): EitherT[F, E0, A] =
+        delegate.raiseError(e)
+
+      def bracketCase[A, B](acquire: EitherT[F, E0, A])(use: A => EitherT[F, E0, B])(
+        release: (A, Case[B]) => EitherT[F, E0, Unit]
+      ): EitherT[F, E0, B] =
+      EitherT {
+        F.bracketCase(
+          acquire.value)(
+          (optA: Either[E0, A]) => optA.flatTraverse(a => use(a).value)(F, catsStdInstancesForEither[E0]))(
+          { (optA: Either[E0, A], resultOpt: F.Case[Either[E0, B]]) =>
+            val resultsF = optA.flatTraverse { a =>
+              release(a, EitherT(resultOpt)).value
+            }(F, catsStdInstancesForEither[E0])
+
+            resultsF.void
+          })
+      }
+
+      def flatMap[A, B](fa: EitherT[F, E0, A])(f: A => EitherT[F, E0, B]): EitherT[F, E0, B] =
+        delegate.flatMap(fa)(f)
+
+      def tailRecM[A, B](a: A)(f: A => EitherT[F, E0, Either[A, B]]): EitherT[F, E0, B] =
         delegate.tailRecM(a)(f)
     }
 }
