@@ -19,7 +19,7 @@ package cats.effect.kernel
 import cats.{ApplicativeError, MonadError}
 import cats.data._
 import cats.implicits._
-import cats.{Functor, Monoid, Semigroup, Semigroupal}
+import cats.{Defer, Functor, Monad, Monoid, Semigroup, Semigroupal}
 
 // represents the type Bracket | Region
 sealed trait Safe[F[_], E] extends MonadError[F, E] {
@@ -41,6 +41,7 @@ trait Bracket[F[_], E] extends Safe[F, E] {
 }
 
 object Bracket {
+
   type Aux[F[_], E, Case0[_]] = Bracket[F, E] { type Case[A] = Case0[A] }
   type Aux2[F[_], E, Case0[_, _]] = Bracket[F, E] { type Case[A] = Case0[E, A] }
 
@@ -204,8 +205,10 @@ object Bracket {
         delegate.tailRecM(a)(f)
     }
 
-  implicit def bracketForStateT[F[_], S, E](
-    implicit F: Bracket[F, E]
+  implicit def bracketForStateT[F[_], S, E, C[_]](
+    implicit F: Bracket.Aux[F, E, C],
+    Case: MonadError[C, E],
+    M: Monad[F]
   ): Bracket.Aux[StateT[F, S, *], E, StateT[F.Case, S, *]] =
     new Bracket[StateT[F, S, *], E] {
 
@@ -214,24 +217,23 @@ object Bracket {
       type Case[A] = StateT[F.Case, S, A]
 
       // TODO put this into cats-core
+
       def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
 
         def pure[A](x: A): StateT[F.Case, S, A] =
           StateT.pure[F.Case, S, A](x)(F.CaseInstance)
 
-        def handleErrorWith[A](fa: StateT[F.Case, S, A])(f: E => StateT[F.Case, S, A]): StateT[F.Case, S, A] = ???
-        // StateT(s => F.CaseInstance.ap(fa.runF)(F.CaseInstance.pure(s)))
-        // StateT(F.CaseInstance.handleErrorWith(fa.value)(f.andThen(_.value)))
+        def handleErrorWith[A](fa: StateT[F.Case, S, A])(f: E => StateT[F.Case, S, A]): StateT[F.Case, S, A] =
+          StateT(s => Case.handleErrorWith(fa.run(s))(e => f(e).run(s)))
 
         def raiseError[A](e: E): StateT[F.Case, S, A] =
           StateT.liftF(F.CaseInstance.raiseError[A](e))(F.CaseInstance)
 
-        def ap[A, B](ff: StateT[F.Case, S, A => B])(fa: StateT[F.Case, S, A]): StateT[F.Case, S, B] = ???
-        // OptionT {
-        //   F.CaseInstance.map(F.CaseInstance.product(ff.value, fa.value)) {
-        //     case (optfab, opta) => (optfab, opta).mapN(_(_))
-        //   }
-        // }
+        def ap[A, B](ff: StateT[F.Case, S, A => B])(fa: StateT[F.Case, S, A]): StateT[F.Case, S, B] =
+          for {
+            f <- ff
+            a <- fa
+          } yield f(a)
       }
 
       def pure[A](x: A): StateT[F, S, A] =
@@ -243,19 +245,20 @@ object Bracket {
       def raiseError[A](e: E): StateT[F, S, A] =
         delegate.raiseError(e)
 
+      //TODO this requires a Ref implementation to pass the state from use to release
       def bracketCase[A, B](
         acquire: StateT[F, S, A]
-      )(use: A => StateT[F, S, B])(release: (A, Case[B]) => StateT[F, S, Unit]): StateT[F, S, B] = ???
-      // OptionT {
-      //   F.bracketCase(acquire.value)((optA: Option[A]) => optA.flatTraverse(a => use(a).value)) {
-      //     (optA: Option[A], resultOpt: F.Case[Option[B]]) =>
-      //       val resultsF = optA.flatTraverse { a =>
-      //         release(a, OptionT(resultOpt)).value
-      //       }
-
-      //       resultsF.void
-      //   }
-      // }
+      )(use: A => StateT[F, S, B])(release: (A, Case[B]) => StateT[F, S, Unit]): StateT[F, S, B] =
+        StateT { s =>
+          F.bracketCase(acquire.runF)((f: S => F[(S, A)]) =>
+            for {
+              x <- f(s)
+              s1 = x._1
+              a = x._2
+              r <- M.flatMap(use(a).runF)(g => g(s1))
+            } yield r
+          )((a: S => F[(S, A)], result: F.Case[(S, B)]) => ???)
+        }
 
       def flatMap[A, B](fa: StateT[F, S, A])(f: A => StateT[F, S, B]): StateT[F, S, B] =
         delegate.flatMap(fa)(f)
@@ -435,6 +438,125 @@ object Bracket {
         delegate.flatMap(fa)(f)
 
       def tailRecM[A, B](a: A)(f: A => Kleisli[F, R, Either[A, B]]): Kleisli[F, R, B] =
+        delegate.tailRecM(a)(f)
+    }
+
+  implicit def bracketForContT[F[_], R, E](
+    implicit F: Bracket[F, E],
+    D: Defer[F]
+  ): Bracket.Aux[ContT[F, R, *], E, ContT[F.Case, R, *]] =
+    new Bracket[ContT[F, R, *], E] {
+
+      private[this] val delegate = ContT.catsDataContTMonad[F, R]
+
+      type Case[A] = ContT[F.Case, R, A]
+
+      // TODO put this into cats-core
+      def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
+
+        def pure[A](x: A): ContT[F.Case, R, A] = ContT.pure[F.Case, R, A](x)
+
+        def handleErrorWith[A](fa: ContT[F.Case, R, A])(f: E => ContT[F.Case, R, A]): ContT[F.Case, R, A] = ???
+        // Kleisli(r => F.CaseInstance.handleErrorWith(fa.run(r))(f.andThen(_.run(r))))
+
+        def raiseError[A](e: E): ContT[F.Case, R, A] = ???
+        // Kleisli.liftF(F.CaseInstance.raiseError[A](e))
+
+        def ap[A, B](ff: ContT[F.Case, R, A => B])(fa: ContT[F.Case, R, A]): ContT[F.Case, R, B] = ???
+        // Kleisli { r =>
+        //   F.CaseInstance.map(F.CaseInstance.product(ff.run(r), fa.run(r))) {
+        //     case (fab, a) => fab(a)
+        //   }
+        // }
+      }
+
+      def pure[A](x: A): ContT[F, R, A] =
+        delegate.pure(x)
+
+      def handleErrorWith[A](fa: ContT[F, R, A])(f: E => ContT[F, R, A]): ContT[F, R, A] = ???
+      // delegate.handleErrorWith(fa)(f)
+
+      def raiseError[A](e: E): ContT[F, R, A] = ???
+      // delegate.raiseError(e)
+
+      def bracketCase[A, B](
+        acquire: ContT[F, R, A]
+      )(use: A => ContT[F, R, B])(release: (A, Case[B]) => ContT[F, R, Unit]): ContT[F, R, B] = ???
+      // Kleisli { r =>
+      //   F.bracketCase(acquire.run(r))((a: A) => use(a).run(r)) { (a: A, result: F.Case[B]) =>
+      //     val resultsF = release(a, Kleisli.liftF(result)).run(r)
+
+      //     resultsF.void
+      //   }
+      // }
+
+      def flatMap[A, B](fa: ContT[F, R, A])(f: A => ContT[F, R, B]): ContT[F, R, B] =
+        delegate.flatMap(fa)(f)
+
+      def tailRecM[A, B](a: A)(f: A => ContT[F, R, Either[A, B]]): ContT[F, R, B] =
+        delegate.tailRecM(a)(f)
+    }
+
+  implicit def bracketForReaderWriterStateT[F[_], R, L, S, E, C[_]](
+    implicit F: Bracket.Aux[F, E, C],
+    Case: MonadError[C, E],
+    L: Monoid[L]
+  ): Bracket.Aux[ReaderWriterStateT[F, R, L, S, *], E, ReaderWriterStateT[F.Case, R, L, S, *]] =
+    new Bracket[ReaderWriterStateT[F, R, L, S, *], E] {
+
+      private[this] val delegate = IndexedReaderWriterStateT.catsDataMonadErrorForIRWST[F, R, L, S, E]
+
+      type Case[A] = ReaderWriterStateT[F.Case, R, L, S, A]
+
+      // TODO put this into cats-core
+      def CaseInstance: ApplicativeError[Case, E] = new ApplicativeError[Case, E] {
+
+        def pure[A](x: A): ReaderWriterStateT[F.Case, R, L, S, A] =
+          ReaderWriterStateT.pure[F.Case, R, L, S, A](x)(F.CaseInstance, L)
+
+        def handleErrorWith[A](
+          fa: ReaderWriterStateT[F.Case, R, L, S, A]
+        )(f: E => ReaderWriterStateT[F.Case, R, L, S, A]): ReaderWriterStateT[F.Case, R, L, S, A] =
+          ReaderWriterStateT((r, s) => Case.handleErrorWith(fa.run(r, s))(f.andThen(_.run(r, s))))
+
+        def raiseError[A](e: E): ReaderWriterStateT[F.Case, R, L, S, A] =
+          ReaderWriterStateT.liftF(F.CaseInstance.raiseError(e))
+
+        def ap[A, B](
+          ff: ReaderWriterStateT[F.Case, R, L, S, A => B]
+        )(fa: ReaderWriterStateT[F.Case, R, L, S, A]): ReaderWriterStateT[F.Case, R, L, S, B] =
+          for {
+            f <- ff
+            a <- fa
+          } yield f(a)
+      }
+
+      def pure[A](x: A): ReaderWriterStateT[F, R, L, S, A] =
+        delegate.pure(x)
+
+      def handleErrorWith[A](
+        fa: ReaderWriterStateT[F, R, L, S, A]
+      )(f: E => ReaderWriterStateT[F, R, L, S, A]): ReaderWriterStateT[F, R, L, S, A] =
+        delegate.handleErrorWith(fa)(f)
+
+      def raiseError[A](e: E): ReaderWriterStateT[F, R, L, S, A] =
+        delegate.raiseError(e)
+
+      //TODO this requires a Ref implementation to pass the state from use to release
+      def bracketCase[A, B](
+        acquire: ReaderWriterStateT[F, R, L, S, A]
+      )(use: A => ReaderWriterStateT[F, R, L, S, B])(
+        release: (A, Case[B]) => ReaderWriterStateT[F, R, L, S, Unit]
+      ): ReaderWriterStateT[F, R, L, S, B] = ???
+
+      def flatMap[A, B](
+        fa: ReaderWriterStateT[F, R, L, S, A]
+      )(f: A => ReaderWriterStateT[F, R, L, S, B]): ReaderWriterStateT[F, R, L, S, B] =
+        delegate.flatMap(fa)(f)
+
+      def tailRecM[A, B](
+        a: A
+      )(f: A => ReaderWriterStateT[F, R, L, S, Either[A, B]]): ReaderWriterStateT[F, R, L, S, B] =
         delegate.tailRecM(a)(f)
     }
 }
