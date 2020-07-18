@@ -17,7 +17,7 @@
 package cats.effect
 
 import cats.Show
-import cats.laws.discipline.ParallelTests
+import cats.laws.discipline.{ParallelTests, CommutativeApplicativeTests}
 import cats.implicits._
 import cats.effect.laws.ConcurrentBracketTests
 import cats.effect.kernel.ParallelF
@@ -46,6 +46,11 @@ class PureConcSpec extends Specification with Discipline with ScalaCheck {
     "PureConc",
     ConcurrentBracketTests[PureConc[Int, *], Int].concurrentBracket[Int, Int, Int]
   ) /*(Parameters(seed = Some(Seed.fromBase64("OjD4TDlPxwCr-K-gZb-xyBOGeWMKx210V24VVhsJBLI=").get)))*/
+
+  checkAll(
+    "ParallelF",
+    CommutativeApplicativeTests[ParallelF[PureConc[Int, *], *]].commutativeApplicative[Int, Int, Int]
+  )
 
   checkAll(
     "PureConc",

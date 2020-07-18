@@ -16,7 +16,8 @@
 
 package cats.effect.instances
 
-import cats.{~>, Applicative, Monad, Parallel}
+import cats.{~>, Applicative, CommutativeApplicative, Monad, Parallel}
+import cats.implicits._
 import cats.effect.kernel.{Concurrent, ParallelF}
 
 trait ConcurrentInstances {
@@ -25,7 +26,7 @@ trait ConcurrentInstances {
     new Parallel[M] {
       type F[A] = ParallelF[M, A]
 
-      def applicative: Applicative[F] = ParallelF.applicativeForParallelF[M, E]
+      def applicative: Applicative[F] = commutativeApplicativeForParallelF[M, E]
 
       def monad: Monad[M] = M
 
@@ -40,4 +41,19 @@ trait ConcurrentInstances {
         }
 
     }
+
+    implicit def commutativeApplicativeForParallelF[F[_], E](
+        implicit F: Concurrent[F, E]): CommutativeApplicative[ParallelF[F, *]] =
+      new CommutativeApplicative[ParallelF[F, *]] {
+
+        def pure[A](a: A): ParallelF[F, A] = ParallelF(F.pure(a))
+
+        def ap[A, B](ff: ParallelF[F, A => B])(fa: ParallelF[F, A]): ParallelF[F, B] =
+          ParallelF(
+            F.both(ParallelF.value(ff), ParallelF.value(fa)).map {
+              case (f, a) => f(a)
+            }
+          )
+
+      }
 }

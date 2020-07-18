@@ -34,21 +34,6 @@ object Par {
     def apply[F[_], A](fa: F[A]): ParallelF[F, A] = instance[F, A](fa)
 
     def value[F[_], A](t: ParallelF[F, A]): F[A] = instance.value(t)
-
-    implicit def applicativeForParallelF[F[_], E](
-        implicit F: Concurrent[F, E]): Applicative[ParallelF[F, *]] =
-      new Applicative[ParallelF[F, *]] {
-
-        def pure[A](a: A): ParallelF[F, A] = ParallelF(F.pure(a))
-
-        def ap[A, B](ff: ParallelF[F, A => B])(fa: ParallelF[F, A]): ParallelF[F, B] =
-          ParallelF(
-            F.both(ParallelF.value(ff), ParallelF.value(fa)).map {
-              case (f, a) => f(a)
-            }
-          )
-
-      }
   }
 
   val instance: ParallelFImpl = new ParallelFImpl {
