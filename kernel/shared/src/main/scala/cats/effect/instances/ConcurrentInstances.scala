@@ -16,7 +16,8 @@
 
 package cats.effect.instances
 
-import cats.{~>, Applicative, CommutativeApplicative, Monad, Parallel}
+import cats.{~>, Align, Applicative, CommutativeApplicative, Functor, Monad, Parallel}
+import cats.data.Ior
 import cats.implicits._
 import cats.effect.kernel.{Concurrent, ParallelF}
 
@@ -42,18 +43,39 @@ trait ConcurrentInstances {
 
     }
 
-    implicit def commutativeApplicativeForParallelF[F[_], E](
-        implicit F: Concurrent[F, E]): CommutativeApplicative[ParallelF[F, *]] =
-      new CommutativeApplicative[ParallelF[F, *]] {
+  implicit def commutativeApplicativeForParallelF[F[_], E](
+      implicit F: Concurrent[F, E]): CommutativeApplicative[ParallelF[F, *]] =
+    new CommutativeApplicative[ParallelF[F, *]] {
 
-        def pure[A](a: A): ParallelF[F, A] = ParallelF(F.pure(a))
+      def pure[A](a: A): ParallelF[F, A] = ParallelF(F.pure(a))
 
-        def ap[A, B](ff: ParallelF[F, A => B])(fa: ParallelF[F, A]): ParallelF[F, B] =
-          ParallelF(
-            F.both(ParallelF.value(ff), ParallelF.value(fa)).map {
-              case (f, a) => f(a)
-            }
-          )
+      def ap[A, B](ff: ParallelF[F, A => B])(fa: ParallelF[F, A]): ParallelF[F, B] =
+        ParallelF(
+          F.both(ParallelF.value(ff), ParallelF.value(fa)).map {
+            case (f, a) => f(a)
+          }
+        )
 
-      }
+    }
+
+  implicit def alignForParallelF[F[_], E](
+      implicit F: Concurrent[F, E]): Align[ParallelF[F, *]] =
+    new Align[ParallelF[F, *]] {
+
+      override def functor: Functor[ParallelF[F, *]] = commutativeApplicativeForParallelF[F, E]
+
+      override def align[A, B](
+          fa: ParallelF[F, A],
+          fb: ParallelF[F, B]): ParallelF[F, Ior[A, B]] =
+        alignWith(fa, fb)(identity)
+
+      override def alignWith[A, B, C](fa: ParallelF[F, A], fb: ParallelF[F, B])(
+          f: Ior[A, B] => C): ParallelF[F, C] =
+        ParallelF(
+          (ParallelF.value(fa).attempt, ParallelF.value(fb).attempt)
+            .parMapN((ea, eb) => catsStdInstancesForEither.alignWith(ea, eb)(f))
+            .flatMap(F.fromEither)
+        )
+
+    }
 }

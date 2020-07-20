@@ -16,9 +16,6 @@
 
 package cats.effect.kernel
 
-import cats.Applicative
-import cats.implicits._
-
 //See https://failex.blogspot.com/2017/04/the-high-cost-of-anyval-subclasses.html
 object Par {
   sealed abstract class ParallelFImpl {
