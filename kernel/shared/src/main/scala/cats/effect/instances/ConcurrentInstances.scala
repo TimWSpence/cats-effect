@@ -16,9 +16,7 @@
 
 package cats.effect.instances
 
-import cats.{~>, Align, Applicative, Functor, Monad, Parallel}
-import cats.data.Ior
-import cats.implicits._
+import cats.{~>, Applicative, Monad, Parallel}
 import cats.effect.kernel.{Concurrent, ParallelF}
 
 trait ConcurrentInstances {
@@ -27,7 +25,7 @@ trait ConcurrentInstances {
     new Parallel[M] {
       type F[A] = ParallelF[M, A]
 
-      def applicative: Applicative[F] = applicativeForParallelF[M, E]
+      def applicative: Applicative[F] = ParallelF.applicativeForParallelF[M, E]
 
       def monad: Monad[M] = M
 
@@ -43,42 +41,4 @@ trait ConcurrentInstances {
 
     }
 
-  implicit def applicativeForParallelF[F[_], E](
-      implicit F: Concurrent[F, E]): Applicative[ParallelF[F, *]] =
-    new Applicative[ParallelF[F, *]] {
-
-      def pure[A](a: A): ParallelF[F, A] = ParallelF(F.pure(a))
-
-      override def map[A, B](fa: ParallelF[F, A])(f: A => B): ParallelF[F, B] =
-        ParallelF(ParallelF.value(fa).map(f))
-
-      def ap[A, B](ff: ParallelF[F, A => B])(fa: ParallelF[F, A]): ParallelF[F, B] =
-        ParallelF(
-          F.both(ParallelF.value(ff), ParallelF.value(fa)).map {
-            case (f, a) => f(a)
-          }
-        )
-
-    }
-
-  implicit def alignForParallelF[F[_], E](
-      implicit F: Concurrent[F, E]): Align[ParallelF[F, *]] =
-    new Align[ParallelF[F, *]] {
-
-      override def functor: Functor[ParallelF[F, *]] = applicativeForParallelF[F, E]
-
-      override def align[A, B](
-          fa: ParallelF[F, A],
-          fb: ParallelF[F, B]): ParallelF[F, Ior[A, B]] =
-        alignWith(fa, fb)(identity)
-
-      override def alignWith[A, B, C](fa: ParallelF[F, A], fb: ParallelF[F, B])(
-          f: Ior[A, B] => C): ParallelF[F, C] =
-        ParallelF(
-          (ParallelF.value(fa).attempt, ParallelF.value(fb).attempt)
-            .parMapN((ea, eb) => catsStdInstancesForEither.alignWith(ea, eb)(f))
-            .flatMap(F.fromEither)
-        )
-
-    }
 }
