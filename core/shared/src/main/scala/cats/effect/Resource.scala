@@ -110,7 +110,7 @@ sealed abstract class Resource[+F[_], +A] {
     //@tailrec scala 2.13  thinks this isn't tail recursive ¯\_(ツ)_/
     def loop(current: Resource[G, Any], stack: List[Any => Resource[G, Any]]): G[Any] =
       current match {
-        case a @ Allocate(_) => {
+        case a: Allocate[g, _] => {
           val cur = a.asInstanceOf[Allocate[G, Any]]
           G.bracketCase(cur.resource) {
             case (a, _) =>
@@ -123,11 +123,11 @@ sealed abstract class Resource[+F[_], +A] {
               onRelease(release(ec))
           }
         }
-        case b @ Bind(_, _) => {
+        case b: Bind[g, _, _] => {
           val cur = b.asInstanceOf[Bind[G, Any, Any]]
           loop(cur.source, cur.fs.asInstanceOf[Any => Resource[G, Any]] :: stack)
         }
-        case s @ Suspend(_) => {
+        case s: Suspend[g, _] => {
           val cur = s.asInstanceOf[Suspend[G, Any]]
           cur.resource.flatMap(continue(_, stack))
         }
@@ -228,12 +228,18 @@ sealed abstract class Resource[+F[_], +A] {
       f: G ~> H
   )(implicit D: Defer[H], G: Applicative[H]): Resource[H, A] =
     this match {
-      case Allocate(resource) =>
-        Allocate(f(resource).map { case (a, r) => (a, r.andThen(u => f(u))) })
-      case Bind(source, f0) =>
-        Bind(Suspend(D.defer(G.pure(source.mapK(f)))), f0.andThen(_.mapK(f)))
-      case Suspend(resource) =>
-        Suspend(f(resource).map(_.mapK(f)))
+      case a: Allocate[f, _] => {
+        val cur = a.asInstanceOf[Allocate[F, A]]
+        Allocate(f(cur.resource).map { case (a, r) => (a, r.andThen(u => f(u))) })
+      }
+      case b: Bind[f, _, _] => {
+        val cur = b.asInstanceOf[Bind[F, Any, A]]
+        Bind(Suspend(D.defer(G.pure(cur.source.mapK(f)))), cur.fs.andThen(_.mapK(f)))
+      }
+      case s: Suspend[f, _] => {
+        val cur = s.asInstanceOf[Suspend[F, A]]
+        Suspend(f(cur.resource).map(_.mapK(f)))
+      }
     }
 
   /**
@@ -274,7 +280,7 @@ sealed abstract class Resource[+F[_], +A] {
         stack: List[Any => Resource[G, Any]],
         release: G[Unit]): G[(Any, G[Unit])] =
       current match {
-        case a @ Allocate(_) => {
+        case a: Allocate[g, _] => {
           val cur = a.asInstanceOf[Allocate[G, Any]]
           G.bracketCase(cur.resource) {
             case (a, rel) =>
@@ -290,11 +296,11 @@ sealed abstract class Resource[+F[_], +A] {
               release(ec)
           }
         }
-        case b @ Bind(_, _) => {
+        case b: Bind[g, _, _] => {
           val cur = b.asInstanceOf[Bind[G, Any, Any]]
           loop(cur.source, cur.fs.asInstanceOf[Any => Resource[G, Any]] :: stack, release)
         }
-        case s @ Suspend(_) => {
+        case s: Suspend[g, _] => {
           val cur = s.asInstanceOf[Suspend[G, Any]]
           cur.resource.flatMap(continue(_, stack, release))
         }
@@ -689,26 +695,32 @@ abstract private[effect] class ResourceMonadError[F[_], E]
 
   override def attempt[A](fa: Resource[F, A]): Resource[F, Either[E, A]] =
     fa match {
-      case Allocate(fa) =>
-        Allocate[F, Either[E, A]](F.attempt(fa).map {
+      case a: Allocate[f, _] => {
+        val cur = a.asInstanceOf[Allocate[F, A]]
+        Allocate[F, Either[E, A]](F.attempt(cur.resource).map {
           case Left(error) => (Left(error), (_: ExitCase) => F.unit)
           case Right((a, release)) => (Right(a), release)
         })
-      case Bind(source: Resource[F, Any], fs: (Any => Resource[F, A])) =>
-        Suspend(F.pure(source).map[Resource[F, Either[E, A]]] { source =>
+      }
+      case b: Bind[f, _, _] => {
+        val cur = b.asInstanceOf[Bind[F, Any, A]]
+        Suspend(F.pure(cur.source).map[Resource[F, Either[E, A]]] { source =>
           Bind(
             attempt(source),
             (r: Either[E, Any]) =>
               r match {
                 case Left(error) => Resource.pure[F, Either[E, A]](Left(error))
-                case Right(s) => attempt(fs(s))
+                case Right(s) => attempt(cur.fs(s))
               })
         })
-      case Suspend(resource) =>
-        Suspend(F.attempt(resource) map {
+      }
+      case s: Suspend[f, _] => {
+        val cur = s.asInstanceOf[Suspend[F, A]]
+        Suspend(F.attempt(cur.resource) map {
           case Left(error) => Resource.pure[F, Either[E, A]](Left(error))
           case Right(fa: Resource[F, A]) => attempt(fa)
         })
+      }
     }
 
   def handleErrorWith[A](fa: Resource[F, A])(f: E => Resource[F, A]): Resource[F, A] =
@@ -738,7 +750,7 @@ abstract private[effect] class ResourceMonad[F[_]] extends Monad[Resource[F, *]]
   def tailRecM[A, B](a: A)(f: A => Resource[F, Either[A, B]]): Resource[F, B] = {
     def continue(r: Resource[F, Either[A, B]]): Resource[F, B] =
       r match {
-        case a @ Allocate(_) => {
+        case a: Allocate[f, _] => {
           val cur = a.asInstanceOf[Allocate[F, Either[A, B]]]
           Suspend(cur.resource.flatMap[Resource[F, B]] {
             case (Left(a), release) =>
@@ -747,11 +759,11 @@ abstract private[effect] class ResourceMonad[F[_]] extends Monad[Resource[F, *]]
               F.pure(Allocate[F, B](F.pure((b, release))))
           })
         }
-        case s @ Suspend(_) => {
+        case s: Suspend[f, _] => {
           val cur = s.asInstanceOf[Suspend[F, Either[A, B]]]
           Suspend(cur.resource.map(continue))
         }
-        case b @ Bind(_, _) => {
+        case b: Bind[f, _, _] => {
           val cur = b.asInstanceOf[Bind[F, Any, Either[A, B]]]
           Bind(cur.source, AndThen(cur.fs).andThen(continue))
         }
