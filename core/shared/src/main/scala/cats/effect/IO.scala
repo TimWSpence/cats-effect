@@ -64,33 +64,34 @@ sealed abstract class IO[+A] private () extends IOPlatform[A] {
       }
     }
 
-  def both[B](that: IO[B]): IO[(A, B)] =
-    IO.uncancelable { poll =>
-      racePair(that).flatMap {
-        case Left((oc, f)) =>
-          oc match {
-            case Outcome.Completed(fa) =>
-              poll(f.join).onCancel(f.cancel).flatMap {
-                case Outcome.Completed(fb) => fa.product(fb)
-                case Outcome.Errored(eb) => IO.raiseError(eb)
-                case Outcome.Canceled() => IO.canceled *> IO.never
-              }
-            case Outcome.Errored(ea) => f.cancel *> IO.raiseError(ea)
-            case Outcome.Canceled() => f.cancel *> IO.canceled *> IO.never
-          }
-        case Right((f, oc)) =>
-          oc match {
-            case Outcome.Completed(fb) =>
-              poll(f.join).onCancel(f.cancel).flatMap {
-                case Outcome.Completed(fa) => fa.product(fb)
-                case Outcome.Errored(ea) => IO.raiseError(ea)
-                case Outcome.Canceled() => IO.canceled *> IO.never
-              }
-            case Outcome.Errored(eb) => f.cancel *> IO.raiseError(eb)
-            case Outcome.Canceled() => f.cancel *> IO.canceled *> IO.never
-          }
-      }
-    }
+  def both[B](that: IO[B]): IO[(A, B)] = IO.Both(this, that)
+  // def both[B](that: IO[B]): IO[(A, B)] =
+  //   IO.uncancelable { poll =>
+  //     racePair(that).flatMap {
+  //       case Left((oc, f)) =>
+  //         oc match {
+  //           case Outcome.Completed(fa) =>
+  //             poll(f.join).onCancel(f.cancel).flatMap {
+  //               case Outcome.Completed(fb) => fa.product(fb)
+  //               case Outcome.Errored(eb) => IO.raiseError(eb)
+  //               case Outcome.Canceled() => IO.canceled *> IO.never
+  //             }
+  //           case Outcome.Errored(ea) => f.cancel *> IO.raiseError(ea)
+  //           case Outcome.Canceled() => f.cancel *> IO.canceled *> IO.never
+  //         }
+  //       case Right((f, oc)) =>
+  //         oc match {
+  //           case Outcome.Completed(fb) =>
+  //             poll(f.join).onCancel(f.cancel).flatMap {
+  //               case Outcome.Completed(fa) => fa.product(fb)
+  //               case Outcome.Errored(ea) => IO.raiseError(ea)
+  //               case Outcome.Canceled() => IO.canceled *> IO.never
+  //             }
+  //           case Outcome.Errored(eb) => f.cancel *> IO.raiseError(eb)
+  //           case Outcome.Canceled() => f.cancel *> IO.canceled *> IO.never
+  //         }
+  //     }
+  //   }
 
   def bracket[B](use: A => IO[B])(release: A => IO[Unit]): IO[B] =
     bracketCase(use)((a, _) => release(a))
@@ -152,33 +153,35 @@ sealed abstract class IO[+A] private () extends IOPlatform[A] {
     }
   }
 
-  def race[B](that: IO[B]): IO[Either[A, B]] =
-    IO.uncancelable { poll =>
-      racePair(that).flatMap {
-        case Left((oc, f)) =>
-          oc match {
-            case Outcome.Completed(fa) => f.cancel *> fa.map(Left(_))
-            case Outcome.Errored(ea) => f.cancel *> IO.raiseError(ea)
-            case Outcome.Canceled() =>
-              poll(f.join).onCancel(f.cancel).flatMap {
-                case Outcome.Completed(fb) => fb.map(Right(_))
-                case Outcome.Errored(eb) => IO.raiseError(eb)
-                case Outcome.Canceled() => IO.canceled *> IO.never
-              }
-          }
-        case Right((f, oc)) =>
-          oc match {
-            case Outcome.Completed(fb) => f.cancel *> fb.map(Right(_))
-            case Outcome.Errored(eb) => f.cancel *> IO.raiseError(eb)
-            case Outcome.Canceled() =>
-              poll(f.join).onCancel(f.cancel).flatMap {
-                case Outcome.Completed(fa) => fa.map(Left(_))
-                case Outcome.Errored(ea) => IO.raiseError(ea)
-                case Outcome.Canceled() => IO.canceled *> IO.never
-              }
-          }
-      }
-    }
+  def race[B](that: IO[B]): IO[Either[A, B]] = IO.Race(this, that)
+  // def race[B](that: IO[B]): IO[Either[A, B]] =
+  //   IO.uncancelable { poll =>
+  //     IO.Race(this, that)
+  //       racePair(that).flatMap {
+  //         case Left((oc, f)) =>
+  //           oc match {
+  //             case Outcome.Completed(fa) => f.cancel *> fa.map(Left(_))
+  //             case Outcome.Errored(ea) => f.cancel *> IO.raiseError(ea)
+  //             case Outcome.Canceled() =>
+  //               poll(f.join).onCancel(f.cancel).flatMap {
+  //                 case Outcome.Completed(fb) => fb.map(Right(_))
+  //                 case Outcome.Errored(eb) => IO.raiseError(eb)
+  //                 case Outcome.Canceled() => IO.canceled *> IO.never
+  //               }
+  //           }
+  //         case Right((f, oc)) =>
+  //           oc match {
+  //             case Outcome.Completed(fb) => f.cancel *> fb.map(Right(_))
+  //             case Outcome.Errored(eb) => f.cancel *> IO.raiseError(eb)
+  //             case Outcome.Canceled() =>
+  //               poll(f.join).onCancel(f.cancel).flatMap {
+  //                 case Outcome.Completed(fa) => fa.map(Left(_))
+  //                 case Outcome.Errored(ea) => IO.raiseError(ea)
+  //                 case Outcome.Canceled() => IO.canceled *> IO.never
+  //               }
+  //           }
+  //       }
+  //     }
 
   def raceOutcome[B](that: IO[B]): IO[Either[OutcomeIO[A @uncheckedVariance], OutcomeIO[B]]] =
     IO.uncancelable { _ =>
@@ -258,6 +261,10 @@ sealed abstract class IO[+A] private () extends IOPlatform[A] {
 
             body(poll2).to[F]
           }
+
+        case self: IO.Race[_, _] => F.race(self.ioa.to[F], self.iob.to[F]).asInstanceOf[F[A]]
+
+        case self: IO.Both[_, _] => F.both(self.ioa.to[F], self.iob.to[F]).asInstanceOf[F[A]]
 
         case _: IO.Canceled.type => F.canceled.asInstanceOf[F[A]]
 
@@ -704,6 +711,16 @@ object IO extends IOCompanionPlatform with IOLowPriorityImplicits {
 
   private[effect] final case class Attempt[+A](ioa: IO[A]) extends IO[Either[Throwable, A]] {
     def tag = 20
+  }
+
+  private[effect] final case class Race[A, B](ioa: IO[A], iob: IO[B])
+      extends IO[Either[A, B]] {
+    def tag = 21
+  }
+
+  private[effect] final case class Both[A, B](ioa: IO[A], iob: IO[B])
+      extends IO[(A, B)] {
+    def tag = 22
   }
 
   // Not part of the run loop. Only used in the implementation of IO#to.
