@@ -49,7 +49,7 @@ class BothBenchmark {
   @Benchmark
   def happyPath(): Int = {
     def loop(i: Int): IO[Int] =
-      if (i < size) IO.both(IO.pure(i), IO.pure(i)).flatMap(p => loop(p._1))
+      if (i < size) IO.both(IO.pure(i + 1), IO.pure(i + 1)).flatMap(p => loop(p._1))
       else IO.pure(i)
 
     loop(0).unsafeRunSyncBenchmark()

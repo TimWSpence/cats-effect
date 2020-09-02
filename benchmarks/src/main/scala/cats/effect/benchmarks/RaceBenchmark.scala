@@ -49,7 +49,8 @@ class RaceBenchmark {
   @Benchmark
   def happyPath(): Int = {
     def loop(i: Int): IO[Int] =
-      if (i < size) IO.race(IO.pure(i), IO.pure(i)).flatMap(e => e.fold(loop(_), loop(_)))
+      if (i < size)
+        IO.race(IO.pure(i + 1), IO.pure(i + 1)).flatMap(e => e.fold(loop(_), loop(_)))
       else IO.pure(i)
 
     loop(0).unsafeRunSyncBenchmark()
