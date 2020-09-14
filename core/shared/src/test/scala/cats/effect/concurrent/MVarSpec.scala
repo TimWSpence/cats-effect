@@ -334,42 +334,41 @@ class MVarSpec extends BaseSpec {
     }
   }
 
-  //TODO dependent on Parallel instance for IO
-  // "stack overflow test" in real {
-  //   // Signaling option, because we need to detect completion
-  //   type Channel[A] = MVar[IO, Option[A]]
-  //   val count = 10000
+  "stack overflow test" in real {
+    // Signaling option, because we need to detect completion
+    type Channel[A] = MVar[IO, Option[A]]
+    val count = 10000
 
-  //   def consumer(ch: Channel[Int], sum: Long): IO[Long] =
-  //     ch.take.flatMap {
-  //       case Some(x) =>
-  //         // next please
-  //         consumer(ch, sum + x)
-  //       case None =>
-  //         IO.pure(sum) // we are done!
-  //     }
+    def consumer(ch: Channel[Int], sum: Long): IO[Long] =
+      ch.take.flatMap {
+        case Some(x) =>
+          // next please
+          consumer(ch, sum + x)
+        case None =>
+          IO.pure(sum) // we are done!
+      }
 
-  //   def exec(channel: Channel[Int]): IO[Long] = {
-  //     val consumerTask = consumer(channel, 0L)
-  //     val tasks = for (i <- 0 until count) yield channel.put(Some(i))
-  //     val producerTask = tasks.toList.parSequence.flatMap(_ => channel.put(None))
+    def exec(channel: Channel[Int]): IO[Long] = {
+      val consumerTask = consumer(channel, 0L)
+      val tasks = for (i <- 0 until count) yield channel.put(Some(i))
+      val producerTask = tasks.toList.parSequence.flatMap(_ => channel.put(None))
 
-  //     for {
-  //       f1 <- producerTask.start
-  //       f2 <- consumerTask.start
-  //       _ <- f1.join
-  //       r <- f2.join
-  //     } yield r
-  //   }
+      for {
+        f1 <- producerTask.start
+        f2 <- consumerTask.start
+        _ <- f1.join
+        r <- f2.join
+      } yield r
+    }
 
-  //   val op = init(Option(0)).flatMap(exec)
+    val op = init(Option(0)).flatMap(exec)
 
-  //   op.flatMap { res =>
-  //     IO {
-  //       res must beEqualTo(count.toLong * (count - 1) / 2)
-  //     }
-  //   }
-  // }
+    op.flatMap { res =>
+      IO {
+        res must beEqualTo(count.toLong * (count - 1) / 2)
+      }
+    }
+  }
 
   "take/put test is stack safe" in real {
     def loop(n: Int, acc: Int)(ch: MVar[IO, Int]): IO[Int] =
@@ -501,31 +500,30 @@ class MVarSpec extends BaseSpec {
     }
   }
 
-  //TODO requires a parallel instance for IO
-  // "concurrent take and put"  in real {
-  //   val count = if (Platform.isJvm) 10000 else 1000
-  //   val op = for {
-  //     mVar <- empty[Int]
-  //     ref <- Ref[IO].of(0)
-  //     takes = (0 until count)
-  //       .map(_ => IO.cede *> mVar.read.map2(mVar.take)(_ + _).flatMap(x => ref.update(_ + x)))
-  //       .toList
-  //       .parSequence
-  //     puts = (0 until count).map(_ => IO.cede *> mVar.put(1)).toList.parSequence
-  //     fiber1 <- takes.start
-  //     fiber2 <- puts.start
-  //     _ <- fiber1.join
-  //     _ <- fiber2.join
-  //     r <- ref.get
-  //   } yield r
+  "concurrent take and put"  in real {
+    val count = 10000
+    val op = for {
+      mVar <- empty[Int]
+      ref <- Ref[IO].of(0)
+      takes = (0 until count)
+        .map(_ => IO.cede *> mVar.read.map2(mVar.take)(_ + _).flatMap(x => ref.update(_ + x)))
+        .toList
+        .parSequence
+      puts = (0 until count).map(_ => IO.cede *> mVar.put(1)).toList.parSequence
+      fiber1 <- takes.start
+      fiber2 <- puts.start
+      _ <- fiber1.join
+      _ <- fiber2.join
+      r <- ref.get
+    } yield r
 
-  //   op.flatMap { res =>
-  //     IO {
-  //       res must beEqualTo(count * 2)
-  //     }
-  //   }
-  // }
-  //
+    op.flatMap { res =>
+      IO {
+        res must beEqualTo(count * 2)
+      }
+    }
+  }
+
 
   //There must be a better way to produce const matchError
   //But at least this should print x if we fail to match

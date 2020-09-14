@@ -28,14 +28,12 @@ class RefSpec extends BaseSpec { outer =>
   val smallDelay: IO[Unit] = IO.sleep(20.millis)
 
   "ref" should {
-    //TODO need parallel instance for IO
-    // "support concurrent modifications" in ticked { implicit ticker =>
-    //   val finalValue = 100
-    //   val r = Ref.unsafe[IO, Int](0)
-    //   val modifies = List.fill(finalValue)(r.update(_ + 1)).parSequence
-    //   (modifies.start *> r.get) must completeAs(finalValue)
-
-    // }
+    "support concurrent modifications" in ticked { implicit ticker =>
+      val finalValue = 100
+      val r = Ref.unsafe[IO, Int](0)
+      val modifies = List.fill(finalValue)(r.update(_ + 1)).parSequence
+      (modifies.start *> r.get) must completeAs(finalValue)
+    }
 
     "get and set successfully" in ticked { implicit ticker =>
       val op = for {
