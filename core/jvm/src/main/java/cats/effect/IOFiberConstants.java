@@ -32,7 +32,7 @@ final class IOFiberConstants {
   public static final byte UncancelableK = 7;
   public static final byte UnmaskK = 8;
   public static final byte AttemptK = 9;
-  public static final byte AutoCedeK = 10;
+  public static final byte FlattenK = 10;
 
   // resume ids
   public static final byte ExecR = 0;

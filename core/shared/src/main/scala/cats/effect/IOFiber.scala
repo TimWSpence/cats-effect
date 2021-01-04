@@ -27,7 +27,6 @@ import scala.util.control.NonFatal
 
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.util.control.NoStackTrace
 
 /*
  * Rationale on memory barrier exploitation in this class...
@@ -243,7 +242,7 @@ private final class IOFiber[A](
       asyncCancel(null)
     } else if ((nextIteration % autoYieldThreshold) == 0) {
       objectState.push(cur0)
-      conts.push(AutoCedeK)
+      conts.push(FlattenK)
       cede()
     } else {
       // println(s"<$name> looping on $cur0")
@@ -654,6 +653,11 @@ private final class IOFiber[A](
           } else {
             runLoop(interruptibleImpl(cur, runtime.blocking), nextIteration)
           }
+        case 21 =>
+          val cur = cur0.asInstanceOf[Flatten[Any, Any]]
+          conts.push(FlattenK)
+
+          runLoop(cur.io, nextIteration)
       }
     }
   }
@@ -805,7 +809,7 @@ private final class IOFiber[A](
       case 7 => uncancelableSuccessK(result, depth)
       case 8 => unmaskSuccessK(result, depth)
       case 9 => succeeded(Right(result), depth)
-      case 10 => autoCedeK()
+      case 10 => flattenK()
     }
 
   private[this] def failed(error: Throwable, depth: Int): IO[Any] = {
@@ -821,7 +825,7 @@ private final class IOFiber[A](
      * until we hit a continuation that needs to deal with errors.
      */
     while (i >= 0 && k < 0) {
-      if (buffer(i) == FlatMapK || buffer(i) == MapK || buffer(i) == AutoCedeK)
+      if (buffer(i) == FlatMapK || buffer(i) == MapK || buffer(i) == FlattenK)
         i -= 1
       else
         k = buffer(i)
@@ -1102,7 +1106,7 @@ private final class IOFiber[A](
     failed(t, depth + 1)
   }
 
-  private[this] def autoCedeK(): IO[Any] =
+  private[this] def flattenK(): IO[Any] =
     objectState.pop().asInstanceOf[IO[Any]]
 }
 
@@ -1111,5 +1115,3 @@ private object IOFiber {
   private val OutcomeCanceled = Outcome.Canceled()
   private[effect] val RightUnit = Right(())
 }
-
-private[effect] case object AsyncPropagateCancelation extends NoStackTrace

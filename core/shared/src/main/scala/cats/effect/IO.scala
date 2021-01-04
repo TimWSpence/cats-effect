@@ -86,7 +86,7 @@ sealed abstract class IO[+A] private () extends IOPlatform[A] {
 
   def flatMap[B](f: A => IO[B]): IO[B] = IO.FlatMap(this, f)
 
-  def flatten[B](implicit ev: A <:< IO[B]): IO[B] = flatMap(ev)
+  def flatten[B](implicit ev: A <:< IO[B]): IO[B] = IO.Flatten(this)
 
   def guarantee(finalizer: IO[Unit]): IO[A] =
     guaranteeCase(_ => finalizer)
@@ -692,6 +692,10 @@ object IO extends IOCompanionPlatform with IOLowPriorityImplicits {
 
   private[effect] final case class Blocking[+A](hint: Sync.Type, thunk: () => A) extends IO[A] {
     def tag = 20
+  }
+
+  private[effect] final case class Flatten[A, B](io: IO[A])(implicit ev: A <:< IO[B]) extends IO[B] {
+    def tag = 21
   }
 
   // INTERNAL, only created by the runloop itself as the terminal state of several operations
